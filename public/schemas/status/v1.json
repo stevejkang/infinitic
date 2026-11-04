@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/stevejkang/infinitic/main/public/schemas/status/v1.json",
+  "title": "infinitic status",
+  "description": "Output of `infinitic status --json`: the account pool, each account's usage and health, and the background watch. One JSON document (RFC 8259, UTF-8) on stdout; messages go to stderr.\n\nCompatibility: within schemaVersion 1, properties and enum values are only ever added, never removed, renamed or retyped. Consumers must ignore properties they do not know and must handle enum values they do not know. A breaking change publishes a new schema with a new schemaVersion.\n\nAbsent values: a property listed in `required` is always present; when its value is unknown or does not apply it is null (only `active`, `usage` and `resetsAt` can be null). Every other property is omitted when it has no value and is never null.\n\nTimes are RFC 3339 date-times in UTC with whole seconds, e.g. \"2026-10-18T12:56:21Z\". Percentages are numbers where 0 is unused and 100 is full. The document contains no tokens or credentials.",
+  "type": "object",
+  "required": ["$schema", "schemaVersion", "observedAt", "source", "bars", "active", "accounts"],
+  "properties": {
+    "$schema": {
+      "description": "URI of the JSON Schema this document conforms to: this schema.",
+      "type": "string",
+      "format": "uri",
+      "const": "https://raw.githubusercontent.com/stevejkang/infinitic/main/public/schemas/status/v1.json"
+    },
+    "schemaVersion": {
+      "description": "Major version of this format. Check it before reading the rest: a different value means a different schema.",
+      "type": "integer",
+      "const": 1
+    },
+    "observedAt": {
+      "description": "When the document was produced.",
+      "$ref": "#/$defs/dateTime"
+    },
+    "source": {
+      "description": "Where the usage comes from. \"live\": the accounts were checked against the API while producing this document (a sample that is still fresh may be reused; `--refresh` forces a new read). \"cached\": the last stored state, read without network, keychain or lock (`--cached`).",
+      "type": "string",
+      "enum": ["live", "cached"]
+    },
+    "bars": {
+      "description": "Usage levels at which an account counts as over its bar (`overBar`) and the watch switches away from it. Taken from the flags, else the settings file, else the defaults 90 and 98.",
+      "type": "object",
+      "required": ["session", "weekly"],
+      "properties": {
+        "session": {
+          "description": "Bar for the 5-hour window (`5h`), in percent.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "weekly": {
+          "description": "Bar for the 7-day window (`7d`), in percent.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "active": {
+      "description": "The account that holds Claude Code's primary login; the same account has `active: true` in `accounts`. null when there is no primary login or it belongs to an account outside the pool.",
+      "anyOf": [
+        { "$ref": "#/$defs/accountRef" },
+        { "type": "null" }
+      ]
+    },
+    "service": {
+      "description": "The background watch (`infinitic service`). Omitted when its state could not be determined: an OS without a supported service manager, or a failed query.",
+      "$ref": "#/$defs/service"
+    },
+    "accounts": {
+      "description": "Every account in the pool, in pool order. An empty array when the pool is empty.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/account" }
+    }
+  },
+  "$defs": {
+    "dateTime": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+      "examples": ["2026-10-18T12:56:21Z"]
+    },
+    "uuid": {
+      "description": "The Claude account's UUID. Stable for the account; use it, not the email, as the key.",
+      "type": "string",
+      "format": "uuid",
+      "examples": ["8a3e7b52-4c1d-4f0e-9b2a-6d5c3e1f7a90"]
+    },
+    "email": {
+      "description": "The account's email. Omitted when it is not known.",
+      "type": "string",
+      "format": "email"
+    },
+    "accountRef": {
+      "type": "object",
+      "required": ["uuid"],
+      "properties": {
+        "uuid": { "$ref": "#/$defs/uuid" },
+        "email": { "$ref": "#/$defs/email" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "required": ["installed", "running"],
+      "properties": {
+        "installed": {
+          "description": "The launchd agent (macOS) or systemd user unit (Linux) exists.",
+          "type": "boolean"
+        },
+        "running": {
+          "description": "The watch process is running.",
+          "type": "boolean"
+        },
+        "pid": {
+          "description": "Process ID of the running watch. Omitted when it is not running or the ID is unknown.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "note": {
+          "description": "Advice about the service, for people, e.g. that a systemd user service stops at logout without `loginctl enable-linger`. Omitted when there is none. Not meant to be parsed.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "account": {
+      "type": "object",
+      "required": ["uuid", "active", "health", "overBar", "usage"],
+      "properties": {
+        "uuid": { "$ref": "#/$defs/uuid" },
+        "email": { "$ref": "#/$defs/email" },
+        "plan": {
+          "description": "Subscription plan, for display. Open-ended: new plans appear without a schema change. Omitted until known.",
+          "type": "string",
+          "minLength": 1,
+          "examples": ["Pro", "Max", "Ultra", "Team Premium"]
+        },
+        "active": {
+          "description": "true for the account that holds the primary login (see `active` at the top level); false for a parked one.",
+          "type": "boolean"
+        },
+        "health": {
+          "description": "Whether the account's login can be used. \"ok\": usable. \"degraded\": the last token refresh or usage read failed for a reason that may pass; see `problem`. Rate limiting (HTTP 429) is not reported here, only through `retryAt`. \"needs_reauth\": the login is dead; the account is skipped until `infinitic reauth` renews it.",
+          "type": "string",
+          "enum": ["ok", "degraded", "needs_reauth"]
+        },
+        "problem": {
+          "description": "Human-readable error behind a `health` other than \"ok\". Present exactly when `health` is not \"ok\". Not meant to be parsed.",
+          "type": "string",
+          "minLength": 1
+        },
+        "overBar": {
+          "description": "Usage is at or past its bar in `5h` or `7d`. A window the plan does not have never counts. false while `usage` is null.",
+          "type": "boolean"
+        },
+        "retryAt": {
+          "description": "When infinitic may contact the account again after consecutive failures. In the past once the wait is over. Omitted when the account has never been backed off.",
+          "$ref": "#/$defs/dateTime"
+        },
+        "loginExpiresAt": {
+          "description": "When the account's login (its refresh token) expires; after that it needs `infinitic reauth`. Omitted when the login did not say.",
+          "$ref": "#/$defs/dateTime"
+        },
+        "usage": {
+          "description": "The latest usage reading. null until the account has been read once.",
+          "anyOf": [
+            { "$ref": "#/$defs/usage" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "if": {
+        "properties": { "health": { "const": "ok" } }
+      },
+      "then": {
+        "not": { "required": ["problem"] }
+      },
+      "else": {
+        "required": ["problem"]
+      }
+    },
+    "usage": {
+      "type": "object",
+      "required": ["sampledAt", "windows"],
+      "properties": {
+        "sampledAt": {
+          "description": "When the usage was read from the API. With `source` \"cached\", or when a fresh sample was reused, this is earlier than `observedAt`.",
+          "$ref": "#/$defs/dateTime"
+        },
+        "windows": {
+          "description": "Every usage cap the account has, one entry per label: `5h` first when the plan has it, then `7d`, then narrower caps. `7d` is always present. A missing `5h` means the plan has no 5-hour limit.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/window" }
+        }
+      }
+    },
+    "window": {
+      "type": "object",
+      "required": ["label", "percent", "resetsAt"],
+      "properties": {
+        "label": {
+          "description": "Which cap this is. \"5h\": the 5-hour window. \"7d\": the 7-day window. Anything else is a narrower cap, named after the model it applies to (e.g. \"Opus\") or after its kind. Open-ended: new caps appear without a schema change. Unique within `windows`, ignoring case.",
+          "type": "string",
+          "minLength": 1,
+          "examples": ["5h", "7d", "Opus"]
+        },
+        "percent": {
+          "description": "How much of the cap is used, in percent. Narrower caps are kept within 0 to 100; `5h` and `7d` are passed on as the API reports them.",
+          "type": "number",
+          "minimum": 0
+        },
+        "resetsAt": {
+          "description": "When the window ends and its usage returns to 0. null when the window has not started, because nothing has been used in it yet.",
+          "anyOf": [
+            { "$ref": "#/$defs/dateTime" },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "$schema": "https://raw.githubusercontent.com/stevejkang/infinitic/main/public/schemas/status/v1.json",
+      "schemaVersion": 1,
+      "observedAt": "2026-10-18T12:56:21Z",
+      "source": "live",
+      "bars": { "session": 90, "weekly": 98 },
+      "active": { "uuid": "2f9c41d0-7e3a-4b8c-a1d2-5e6f7a8b9c0d", "email": "b@x.io" },
+      "service": { "installed": true, "running": true, "pid": 5224 },
+      "accounts": [
+        {
+          "uuid": "8a3e7b52-4c1d-4f0e-9b2a-6d5c3e1f7a90",
+          "email": "a@x.io",
+          "plan": "Team Premium",
+          "active": false,
+          "health": "ok",
+          "overBar": true,
+          "loginExpiresAt": "2026-11-15T03:00:00Z",
+          "usage": {
+            "sampledAt": "2026-10-18T12:56:21Z",
+            "windows": [
+              { "label": "5h", "percent": 100, "resetsAt": "2026-10-18T13:09:59Z" },
+              { "label": "7d", "percent": 39, "resetsAt": "2026-10-24T00:59:59Z" }
+            ]
+          }
+        },
+        {
+          "uuid": "2f9c41d0-7e3a-4b8c-a1d2-5e6f7a8b9c0d",
+          "email": "b@x.io",
+          "plan": "Ultra",
+          "active": true,
+          "health": "ok",
+          "overBar": false,
+          "usage": {
+            "sampledAt": "2026-10-18T12:56:21Z",
+            "windows": [
+              { "label": "7d", "percent": 62, "resetsAt": "2026-10-19T13:00:00Z" }
+            ]
+          }
+        },
+        {
+          "uuid": "c4d5e6f7-8a9b-4c0d-9e1f-2a3b4c5d6e7f",
+          "email": "d@x.io",
+          "active": false,
+          "health": "needs_reauth",
+          "problem": "token refresh: invalid_grant",
+          "overBar": false,
+          "usage": null
+        }
+      ]
+    }
+  ]
+}

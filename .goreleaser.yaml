@@ -1,0 +1,55 @@
+version: 2
+
+project_name: infinitic
+
+builds:
+  - id: infinitic
+    main: ./cmd/infinitic
+    binary: infinitic
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}" # reproducible binaries
+
+archives:
+  - ids: [infinitic]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE*, README*]
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]
+
+release:
+  prerelease: auto
+
+homebrew_casks:
+  - name: infinitic
+    repository:
+      owner: stevejkang
+      name: homebrew-tap
+      branch: main
+    homepage: https://github.com/stevejkang/infinitic
+    description: Rotate the primary Claude Code login across a pool of subscription accounts
+    license: MIT
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    skip_upload: auto # prereleases (v1.0.0-rc1) do not update the tap
+    hooks:
+      post:
+        # The binary is not notarized; drop the quarantine flag so Gatekeeper lets it run.
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/infinitic"]
+          end

@@ -1,0 +1,6 @@
+version: "2"
+
+linters:
+  exclusions:
+    # Unchecked Close/Remove/Fprint on cleanup and terminal output paths.
+    presets: [std-error-handling]
