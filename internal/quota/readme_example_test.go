@@ -28,8 +28,8 @@ func TestReadmeExample(t *testing.T) {
 	for _, c := range ranked {
 		ids = append(ids, c.ID)
 	}
-	if got := strings.Join(ids, ""); got != "ABCD" || relaxed {
-		t.Fatalf("order %s relaxed=%v, want ABCD (E skipped) as README says", got, relaxed)
+	if got := strings.Join(ids, ""); got != "ACBD" || relaxed {
+		t.Fatalf("order %s relaxed=%v, want ACBD (E skipped) as README says", got, relaxed)
 	}
 	// Alone, E still has room in L and is used, relaxed.
 	ranked, relaxed = Rank([]Candidate{acct("E", 5, in(1), 97.5, in(10))}, DefaultBars, DefaultParams, now)

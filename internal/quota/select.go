@@ -59,7 +59,8 @@ type scored struct {
 	reset    [2]float64 // hours until reset, +Inf when unknown, -Inf for a window the plan lacks
 	margin   float64    // smallest headroom / required spike margin over both windows; >= 1 fits
 	capped   bool       // a narrower cap (e.g. a per-model weekly limit) is at the weekly bar
-	group    int        // index of the cluster of simultaneous 7d resets
+	deadline float64    // hours until the quota that binds this account expires
+	group    int        // index of the cluster of simultaneous deadlines
 }
 
 // Rank returns the accounts a switch may move to, best first: the quota that expires soonest is
@@ -119,21 +120,26 @@ func score(c Candidate, bars Bars, p Params, now time.Time) (scored, bool) {
 	for _, w := range c.Usage.Others() {
 		s.capped = s.capped || w.Percent >= bars.Weekly
 	}
+	s.deadline = s.reset[1]
+	if !math.IsInf(s.reset[0], 0) { // an open 5h window loses what is left of it at its reset
+		s.deadline = min(s.reset[0], s.reset[1])
+	}
 	return s, true
 }
 
-// order uses the quota resetting within p.Horizon first: earliest 7d reset first (resets within
-// p.Tie of a cluster's first one tie), then no full narrower cap, then the sooner 5h reset (no 5h
-// limit first), then the most 7d quota. Beyond the horizon: started 7d windows before untouched ones (using one
+// order uses the quota expiring within p.Horizon first: earliest deadline (an open 5h window or
+// the 7d window, whichever resets first) first, deadlines within p.Tie of a cluster's first one
+// tie, then no full narrower cap, then the sooner 5h reset (no 5h limit first), then the sooner
+// 7d reset, then the most 7d quota. Beyond the horizon: started 7d windows before untouched ones (using one
 // starts its clock), then no full narrower cap, then the most room in percent. Percent, not
 // absolute room: equal percentages mean equal time to a bar whatever the plan, which keeps more
 // accounts usable on a heavy day (absolute room was worse in select_sim_test.go).
 func order(ss []scored, p Params) {
-	slices.SortStableFunc(ss, func(x, y scored) int { return cmp.Compare(x.reset[1], y.reset[1]) })
+	slices.SortStableFunc(ss, func(x, y scored) int { return cmp.Compare(x.deadline, y.deadline) })
 	for i := range ss {
 		switch {
 		case i == 0:
-		case ss[i].reset[1]-ss[firstOf(ss, i-1)].reset[1] <= p.Tie.Hours():
+		case ss[i].deadline-ss[firstOf(ss, i-1)].deadline <= p.Tie.Hours():
 			ss[i].group = ss[i-1].group
 		default:
 			ss[i].group = ss[i-1].group + 1
@@ -141,7 +147,7 @@ func order(ss []scored, p Params) {
 	}
 	horizon := p.Horizon.Hours()
 	slices.SortStableFunc(ss, func(x, y scored) int {
-		xIn, yIn := x.reset[1] <= horizon, y.reset[1] <= horizon
+		xIn, yIn := x.deadline <= horizon, y.deadline <= horizon
 		if c := compareBool(!xIn, !yIn); c != 0 || !xIn {
 			return cmp.Or(c,
 				compareBool(math.IsInf(x.reset[1], 1), math.IsInf(y.reset[1], 1)),
@@ -152,6 +158,7 @@ func order(ss []scored, p Params) {
 			cmp.Compare(x.group, y.group),
 			compareBool(x.capped, y.capped),
 			cmp.Compare(x.reset[0], y.reset[0]),
+			cmp.Compare(x.reset[1], y.reset[1]),
 			cmp.Compare(y.headroom[1]*y.size[1], x.headroom[1]*x.size[1]),
 		)
 	})

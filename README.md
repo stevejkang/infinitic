@@ -236,7 +236,7 @@ With `--json`, a failure prints one JSON line on stderr: `{"status":"error","rea
 
 ## Which account is next
 
-Weekly quota left over when the 7-day window resets is gone. So infinitic uses up the account whose week ends soonest and saves fresh weeks for later. Taking the account with the most room would do the opposite: start a new week while another one runs out unused.
+Quota left over when a window resets is gone: the rest of an open 5-hour window, or of a week. So infinitic uses whatever expires soonest first and saves fresh weeks for later. Taking the account with the most room would do the opposite: start a new week while another one runs out unused.
 
 ### Room for a switch
 
@@ -264,9 +264,10 @@ Ultra has no 5-hour limit, so it needs no 5-hour room.
 ### The order
 
 1. Only parked, healthy accounts with known usage, a successful last check and enough room in both windows are considered.
-2. Accounts whose week ends within 3 days go first, soonest first. Resets less than an hour apart count as a tie, broken by:
+2. Accounts with quota expiring within 3 days go first, soonest first. An account's quota expires at its open 5-hour window's reset or its week's reset, whichever comes first. Resets less than an hour apart count as a tie, broken by:
    - no per-model cap at the weekly bar,
    - the sooner 5-hour reset, since that usage comes back first (no 5-hour limit counts as soonest),
+   - the sooner weekly reset,
    - the most weekly quota left, scaled by plan size. 10% on Team Premium is more than 20% on Pro.
 3. Then the rest. A started week goes before an untouched one, because touching it starts a new week. Then no per-model cap at the weekly bar, then the most room in the tighter window, in percent.
 4. If no account has enough room, infinitic still switches, since staying over the bar is worse. It takes any account under both bars, without a full per-model cap first, then the one closest to enough room. This logs `event=candidate_margin_relaxed`. If no account is under the bars, `watch` stays and logs how many it skipped.
@@ -279,14 +280,14 @@ Five parked Team Premium accounts, default bars. Each needs 3.6% room in the 5-h
 
 |   | 5h  | resets | 7d    | resets | most room | infinitic |                                                         |
 |---|-----|--------|-------|--------|-----------|-----------|---------------------------------------------------------|
-| A | 20% | 30m    | 70%   | 1d6h   | 4th       | **1st**   | same deadline as B, but its 5-hour window refills first |
-| B | 10% | 4h     | 60%   | 1d6h   | 3rd       | **2nd**   | same deadline as A                                      |
-| C | 30% | 2h     | 50%   | 4d4h   | **2nd**   | 3rd       | nothing expiring soon, week already started             |
+| A | 20% | 30m    | 70%   | 1d6h   | 4th       | **1st**   | 70% of its 5-hour window is gone in 30 minutes          |
+| B | 10% | 4h     | 60%   | 1d6h   | 3rd       | 3rd       | its week still leaves a day after its 5-hour reset      |
+| C | 30% | 2h     | 50%   | 4d4h   | **2nd**   | **2nd**   | 60% of its 5-hour window is gone in 2 hours             |
 | D | 0%  | -      | 0%    | -      | **1st**   | 4th       | using it starts a new week, keep it for later           |
 | E | 5%  | 1h     | 97.5% | 10h    | skipped   | skipped   | 0.5% of the week left, less than a switch costs         |
 
 
-A and B both lose what is left of their week tomorrow. A goes first because its 5-hour window resets in 30 minutes, so whatever it spends now comes back first. Most room would start with D's fresh week while A's 28% and B's 38% expire unused.
+A's open 5-hour window expires first, then C's, then B's; B's week still has a day left after that. Most room would start with D's fresh week while A's 28% and B's 38% of the week expire unused.
 
 ## Development
 

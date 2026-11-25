@@ -51,6 +51,33 @@ func TestRankScenarios(t *testing.T) {
 		relaxed bool
 	}{
 		{
+			name: "an open 5h window expiring soon beats a sooner week",
+			why:  "Y's 80% of 5h is gone in 1h; X's week lasts 20h, so Y first gets the most done now",
+			cands: []Candidate{
+				acct("X", 5, 10, 4, 90, 20),
+				acct("Y", 5, 10, 1, 30, 30),
+			},
+			want: []string{"Y", "X"},
+		},
+		{
+			name: "a week ending before an open 5h window still goes first",
+			why:  "X's week is gone in 1h, before Y's 5h window resets in 3h",
+			cands: []Candidate{
+				acct("X", 5, 10, 4, 50, 1),
+				acct("Y", 5, 10, 3, 30, 30),
+			},
+			want: []string{"X", "Y"},
+		},
+		{
+			name: "golden: real pool, iam's 5h window resets first",
+			why:  "iam's 5h is gone in 58m, steve's in 4h48m; both weeks have room",
+			cands: []Candidate{
+				acct("iam", 6.25, 0, h(0, 0, 58), 37, h(2, 20, 0)),
+				acct("steve", 6.25, 0, h(0, 4, 48), 32, h(1, 6, 0)),
+			},
+			want: []string{"iam", "steve"},
+		},
+		{
 			name: "golden: real pool, first pick",
 			why:  "B's 37% expires in 20h; A has 43h; C is over the 5h bar",
 			cands: []Candidate{
@@ -115,8 +142,8 @@ func TestRankScenarios(t *testing.T) {
 			name: "beyond the horizon, room is compared in percent",
 			why:  "60% free outlasts 50% free at the same pace whatever the plan; absolute room lost in the simulation",
 			cands: []Candidate{
-				acct("pro", 1, 30, 3, 38, 100),
-				acct("max20", 20, 40, 3, 48, 110),
+				acct("pro", 1, 0, none, 38, 100),
+				acct("max20", 20, 0, none, 48, 110),
 			},
 			want: []string{"pro", "max20"},
 		},
@@ -144,7 +171,7 @@ func TestRankScenarios(t *testing.T) {
 		},
 		{
 			name:  "no 7d reset time sorts after known ones",
-			cands: []Candidate{acct("noreset", 5, 10, 3, 10, none), acct("known", 5, 10, 3, 50, 100)},
+			cands: []Candidate{acct("noreset", 5, 0, none, 10, none), acct("known", 5, 0, none, 50, 100)},
 			want:  []string{"known", "noreset"},
 		},
 		{
@@ -175,8 +202,8 @@ func TestRankScenarios(t *testing.T) {
 			name: "beyond the horizon nothing expires soon: spread to the most room",
 			why:  "A resets in 4 days with 18% left, B in 5 days with 58% left: keep both alive for heavy days",
 			cands: []Candidate{
-				acct("A", 5, 10, 3, 80, 96),
-				acct("B", 5, 10, 3, 40, 120),
+				acct("A", 5, 0, none, 80, 96),
+				acct("B", 5, 0, none, 40, 120),
 			},
 			want: []string{"B", "A"},
 		},
@@ -216,8 +243,13 @@ func TestAnAccountWithoutASessionLimit(t *testing.T) {
 		r := now.Add(time.Duration(reset7h * float64(time.Hour)))
 		return Candidate{ID: id, Size: PlanSize("Ultra"), Usage: &Usage{At: now, Windows: []Window{{Label: WeeklyLabel, Percent: u7, ResetsAt: &r}}}}
 	}
-	// A spent 5h window does not apply to it, and it comes before a 5h reset in the same 7d cluster.
+	// It has no 5h window to lose, so an open one expiring in 1h goes first; without one, it comes
+	// before an account whose 5h window is closed in the same 7d cluster.
 	ranked, relaxed := Rank([]Candidate{acct("max", 5, 10, 1, 50, 30), ultra("ultra", 50, 30.5)}, DefaultBars, DefaultParams, now)
+	if got := ids(ranked); relaxed || !slices.Equal(got, []string{"max", "ultra"}) {
+		t.Fatalf("order %v relaxed=%v", got, relaxed)
+	}
+	ranked, relaxed = Rank([]Candidate{acct("max", 5, 0, none, 50, 30), ultra("ultra", 50, 30.5)}, DefaultBars, DefaultParams, now)
 	if got := ids(ranked); relaxed || !slices.Equal(got, []string{"ultra", "max"}) {
 		t.Fatalf("order %v relaxed=%v", got, relaxed)
 	}
